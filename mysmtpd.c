@@ -24,10 +24,19 @@ int main(int argc, char *argv[]) {
   return 0;
 }
 
-void parse_message(char * out, int fd) {
+int parse_message(char * out, int fd) {
+	// TODO: verify that the string ends with \r\n
+
+	// The command will be the first sequence of letters separated by a space
+	// OR, the comand with be followed with a CRLF
 	const char space[] = " ";
 	char *command;
 	command = strtok(out, space); // extract command string from message
+
+	if (strlen(command) > 4) {
+		const char crlf[] = "\r\n";
+		command = strtok(out, crlf);
+	}
 
 	if (strcasecmp(command, "HELO") == 0) {
 		send_formatted(fd, "HELO to you too! \r\n");
@@ -44,15 +53,16 @@ void parse_message(char * out, int fd) {
 	} else if (strcasecmp(command, "VRFY") == 0) {
 		send_formatted(fd, "VRFY command received! \r\n");
 	} else if (strcasecmp(command, "NOOP") == 0) {
-		send_formatted(fd, "NOOP command received! \r\n");
+		send_formatted(fd, "250 OK\r\n");
 	} else if (strcasecmp(command, "QUIT") == 0) {
-		send_formatted(fd, "QUIT command received! \r\n");
+		send_formatted(fd, "221 OK\r\n");
+		return 1; // Return value of 1 means close the connection.
 	} else {
 		send_formatted(fd, "Command \"%s\" is not recognized. \r\n", command);
 	}
 
 
-
+	return 0; // Return value of 0 means keep connection alive
 }
 
 void handle_client(int fd) {
@@ -67,8 +77,11 @@ void handle_client(int fd) {
 	send_formatted(fd, "Welcome\r\n");
 	char out[1024];
 	while(nb_read_line(nb, out) > 0) {
-		parse_message(out, fd);
+		int close = parse_message(out, fd);
+		if (close) {
+			nb_destroy(nb);
+		}
 	}
-  nb_destroy(nb);
+
 	send_formatted(fd, "Goodbye\r\n");
 }
