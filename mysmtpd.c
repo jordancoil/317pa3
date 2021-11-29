@@ -24,6 +24,12 @@ int main(int argc, char *argv[]) {
   return 0;
 }
 
+void parse_message(net_buffer_t nb, int fd) {
+	char out[1024];
+	nb_read_line(nb, out);
+	send_formatted(fd, "Nice Message! (%s) \r\n", out);
+}
+
 void handle_client(int fd) {
 
   char recvbuf[MAX_LINE_LENGTH + 1];
@@ -34,6 +40,8 @@ void handle_client(int fd) {
 
   /* TO BE COMPLETED BY THE STUDENT */
 	send_formatted(fd, "Welcome\r\n");
+	parse_message(nb, fd);
 
   nb_destroy(nb);
+	send_formatted(fd, "Goodbye\r\n");
 }
