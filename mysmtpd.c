@@ -30,11 +30,12 @@ int parse_message(char * out, int fd) {
 	// The command will be the first sequence of letters separated by a space
 	// OR, the comand with be followed with a CRLF
 	const char space[] = " ";
+	const char crlf[] = "\r\n";
+
 	char *command;
 	command = strtok(out, space); // extract command string from message
 
 	if (strlen(command) > 4) {
-		const char crlf[] = "\r\n";
 		command = strtok(out, crlf);
 	}
 
@@ -51,7 +52,13 @@ int parse_message(char * out, int fd) {
 	} else if (strcasecmp(command, "RSET") == 0) {
 		send_formatted(fd, "RSET command received! \r\n");
 	} else if (strcasecmp(command, "VRFY") == 0) {
-		send_formatted(fd, "VRFY command received! \r\n");
+		char *param;
+		param = strtok(strchr(out, ' '), crlf);
+		if (is_valid_user(param, NULL) == 1) {
+			send_formatted(fd, "250 %s \r\n", param);
+		} else {
+			send_formatted(fd, "550 %s is not a valid user \r\n", param);
+		}
 	} else if (strcasecmp(command, "NOOP") == 0) {
 		send_formatted(fd, "250 OK\r\n");
 	} else if (strcasecmp(command, "QUIT") == 0) {
@@ -59,6 +66,7 @@ int parse_message(char * out, int fd) {
 		return 1; // Return value of 1 means close the connection.
 	} else {
 		send_formatted(fd, "Command \"%s\" is not recognized. \r\n", command);
+		// TODO, return 502 for unsupported Command and 500 for unrecognized command
 	}
 
 
