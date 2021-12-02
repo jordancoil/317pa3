@@ -1,3 +1,30 @@
+/* 
+QUICK REFERENCES: 
+https://datatracker.ietf.org/doc/html/rfc1939
+https://ca.prairielearn.com/pl/course_instance/2347/instance_question/13604434/
+
+TODO : 
+
+--- Functional ---
+
+RETR
+DELE
+RSET
+
+--- Bug fix --- 
+
+ACCOUNT HANDLER????
+Do i need this for multi-thread? or global variables are good enough?
+https://piazza.com/class/kt7rxa3xm7tud?cid=554
+
+Handling the "cut in the middle" problem?
+
+--- Other ---
+
+Modualize?
+
+*/
+
 #include "netbuffer.h"
 #include "mailuser.h"
 #include "server.h"
@@ -109,19 +136,28 @@ int handle_requests(const char *request, int fd, int status) {
       send_formatted(fd, "-ERR Please authorize first \r\n");
       return UNAUTHORIZED;
     }
-  }else {
+  }else if(status == OK){
   
   // ---  TRANSACTION MODE ---
     if(strcasecmp(command, "STAT") == 0) {
       send_formatted(fd, "+OK %d %d\r\n", get_mail_count(mail_list_cache), get_user_mail_size(mail_list_cache));
     } else if(strcasecmp(command, "LIST") == 0) {
+
+      int mail_count = get_mail_count(mail_list_cache);
+        
       if (*param >= '0' || *param <= '9') {
         int index = atoi(param);
-        if (index < get_mail_count(mail_list_cache)) {
-          send_formatted(fd, "+OK %d %d\r\n", index, get_mail_size(mail_list_cache, index));
+        if (index < mail_count) {
+          send_formatted(fd, "+OK %d %d\r\n", index, get_mail_item_size(get_mail_item(mail_list_cache, index)));
+        } else {
+          send_formatted(fd, "-ERR No such message\r\n");
         }
       } else {
-        send_formatted(fd, "+OK %d %d\r\n", get_mail_count(mail_list_cache), get_user_mail_size(mail_list_cache));
+        send_formatted(fd, "+OK %d messages, (%d octets)\r\n", mail_count, get_mail_list_size(mail_list_cache));
+        for (int i=0; i < get_mail_count(mail_list_cache); i++) {
+          send_formatted(fd, "%d %d\r\n", i, get_mail_item_size(get_mail_item(mail_list_cache, i)));
+        }
+        send_formatted(fd, ".\r\n");
       }
     } else if(strcasecmp(command, "RETR") == 0) {
       // TODO
@@ -134,6 +170,10 @@ int handle_requests(const char *request, int fd, int status) {
     } else {
       send_formatted(fd, "-ERR Unknown command\r\n");
     }
-
+  }
+  else {
+    send_formatted(fd, "-ERR Wrong status, please start the connection again. \r\n");
+    return CLOSE;
+  }
 
 }
