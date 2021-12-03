@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <sys/utsname.h>
 #include <ctype.h>
+#include <string.h>
 
 #define MAX_LINE_LENGTH 1024
 
@@ -34,8 +35,9 @@ int parse_message(char * out, int fd, int client_init, char domain[]) {
 	const char space[] = " ";
 	const char crlf[] = "\r\n";
 
-	char *command;
-	command = strtok(out, space); // extract command string from message
+	char *command = NULL;
+	command = strdup(out);
+	command = strtok(command, space); // extract command string from message
 
 	if (strlen(command) > 4) {
 		command = strtok(out, crlf);
@@ -48,19 +50,44 @@ int parse_message(char * out, int fd, int client_init, char domain[]) {
 		if (client == NULL) {
 			send_formatted(fd, "501 tell me who you are please. \r\n");
 		} else {
-			client_init = 1;
 			send_formatted(fd, "250 %s \r\n", domain);
+			return 2;
 		}
+
 	} else if (strcasecmp(command, "MAIL") == 0) {
 		if (client_init == 0) {
-				send_formatted(fd, "503 bad sequence of commands \r\n");
+			send_formatted(fd, "503 bad sequence of commands \r\n");
+		} else {
+
+			const char fromlc[] = "from:";
+			const char fromuc[] = "FROM:";
+			char *param;
+			param = strstr(out, fromlc);
+			if (param == NULL) {
+				param = strstr(out, fromuc);
+			}
+
+			if (param == NULL) {
+				send_formatted(fd, "501 who is this from? \r\n");
+			} else {
+				send_formatted(fd, "250 OK (%s) \r\n", param);
+			}
 		}
-		send_formatted(fd, "MAIL command received! \r\n");
+
 	} else if (strcasecmp(command, "RCPT") == 0) {
 		if (client_init == 0) {
 				send_formatted(fd, "503 bad sequence of commands \r\n");
+		} else {
+			// const char to[] = "to:";
+			// char *param;
+			// param = strstr(out, to);
+			// if (param == NULL) {
+			// 	send_formatted(fd, "501 who is this to? \r\n");
+			// }
+
+			// TODO handle multiple recipients
+			send_formatted(fd, "250 OK (%s) \r\n", "asdf");
 		}
-		send_formatted(fd, "RCPT command received! \r\n");
 	} else if (strcasecmp(command, "DATA") == 0) {
 		if (client_init == 0) {
 				send_formatted(fd, "503 bad sequence of commands \r\n");
@@ -94,7 +121,6 @@ int parse_message(char * out, int fd, int client_init, char domain[]) {
 		// TODO, return 502 for unsupported Command and 500 for unrecognized command
 	}
 
-
 	return 0; // Return value of 0 means keep connection alive
 }
 
@@ -111,10 +137,14 @@ void handle_client(int fd) {
 	char out[1024];
 	int client_init = 0;
 	while(nb_read_line(nb, out) > 0) {
-		int close = parse_message(out, fd, client_init, my_uname.__domainname);
-		if (close) {
+		// send_formatted(fd, "  -- parsing command -- \r\n"); // FOR TESTING
+		int code = parse_message(out, fd, client_init, my_uname.__domainname);
+		if (code == 1) {
 			nb_destroy(nb);
+		} else if (code == 2) {
+			client_init = 1;
 		}
+		// send_formatted(fd, "  -- waiting for next command -- \r\n"); // FOR TESTING
 	}
 
 	send_formatted(fd, "Goodbye\r\n");
