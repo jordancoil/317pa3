@@ -11,9 +11,17 @@
 
 #define MAX_LINE_LENGTH 1024
 
+#define CONN_AWAITING_HELO_EHLO 1
+#define CONN_OK 2
+#define CONN_MAIL_PRODECURE_AWAITING_RCPT 3
+#define CONN_MAIL_PRODECURE_AWAITING_RCPT_OR_DATA 4
+#define CONN_MAIL_PRODECURE_AWAITING_MORE_DATA 5
+#define CONN_CLOSE -1
+
 static void handle_client(int fd);
 
-char * get_rcpt(char * buf);
+char * get_reverse_path(char * buf);
+char * get_forward_path(char * buf);
 
 int main(int argc, char *argv[]) {
 
@@ -27,7 +35,7 @@ int main(int argc, char *argv[]) {
   return 0;
 }
 
-int parse_message(char * out, int fd, int client_init, char domain[]) {
+void parse_message(char * out, int fd, int * status, char domain[]) {
 	// TODO: verify that the string ends with \r\n
 
 	// TODO: add command sequence, and "503 bad sequence of commands" if not followed
@@ -42,70 +50,80 @@ int parse_message(char * out, int fd, int client_init, char domain[]) {
 	command = strtok(command, space); // extract command string from message
 
 	if (strlen(command) > 4) {
-		command = strtok(out, crlf);
+		command = strtok(command, crlf);
 	}
 
 	if (strcasecmp(command, "HELO") == 0 || strcasecmp(command, "EHLO") == 0) {
-		char *client;
-		client = strtok(strchr(out, ' '), crlf);
-
-		if (client == NULL) {
-			send_formatted(fd, "501 tell me who you are please. \r\n");
+		if (*status != CONN_AWAITING_HELO_EHLO && *status != CONN_OK) {
+			send_formatted(fd, "503 bad sequence of commands (status: %d) \r\n", *status);
+			send_formatted(fd, "  status should be %d \r\n", CONN_AWAITING_HELO_EHLO);
 		} else {
-			send_formatted(fd, "250 %s \r\n", domain);
-			return 2;
-		}
+			char *client;
+			client = strtok(strchr(out, ' '), crlf);
 
+			if (client == NULL) {
+				send_formatted(fd, "501 syntax error in parameters or arguments \r\n");
+			} else {
+				send_formatted(fd, "250 %s \r\n", domain);
+				*status = CONN_OK;
+			}
+		}
 	} else if (strcasecmp(command, "MAIL") == 0) {
-		if (client_init == 0) {
+		if (*status != CONN_OK) {
 			send_formatted(fd, "503 bad sequence of commands \r\n");
 		} else {
+			char * from = get_reverse_path(out);
 
-			const char fromlc[] = "from:<";
-			const char fromuc[] = "FROM:<";
-			char *param;
-			param = strstr(out, fromlc);
-			if (param == NULL) {
-				param = strstr(out, fromuc);
-			}
-
-			if (param == NULL) {
+			if (from == NULL) {
 				send_formatted(fd, "501 who is this from? \r\n");
 			} else {
-				param[strcspn(param, "\r\n")] = 0;
-				// TODO get the from user inside the "<...>"
-				// TODO check the reverse-path is valid
+				// TODO check the reverse-path is valid???
 				// TODO check the mail-parameters after the reverse-path
 				// TODO store reverse-path
-				send_formatted(fd, "250 OK (%s) \r\n", param);
+				send_formatted(fd, "250 OK (%s) \r\n", from);
+				*status = CONN_MAIL_PRODECURE_AWAITING_RCPT;
 			}
 		}
 
 	} else if (strcasecmp(command, "RCPT") == 0) {
-		if (client_init == 0) {
+		if (*status != CONN_MAIL_PRODECURE_AWAITING_RCPT && CONN_MAIL_PRODECURE_AWAITING_RCPT_OR_DATA) {
 				send_formatted(fd, "503 bad sequence of commands \r\n");
 		} else {
-			char * rcpt = get_rcpt(out);
+			char * rcpt = get_forward_path(out);
 
-			// TODO handle multiple recipients
 			if (rcpt == NULL) {
-				send_formatted(fd, "501 who is this to? \r\n");
+				send_formatted(fd, "501 syntax error in parameters or arguments \r\n");
 			} else {
-				// param[strcspn(param, "\r\n")] = 0;
-				// TODO get the from user inside the "<...>"
-				// TODO check the forward-path is valid (call is_valid_user ???)
-				// TODO check the mail-parameters after the forward-path
-				// TODO store forward-path
-				send_formatted(fd, "250 OK (%s) \r\n", rcpt);
+				if (is_valid_user(rcpt, NULL) == 1) {
+					// TODO check the mail-parameters after the forward-path
+					// TODO store forward-path
+					// TODO handle multiple recipients
+					send_formatted(fd, "250 OK (%s) \r\n", rcpt);
+					*status = CONN_MAIL_PRODECURE_AWAITING_RCPT_OR_DATA;
+				} else {
+					send_formatted(fd, "550 mailbox unavailable \r\n");
+				}
 			}
 		}
-	} else if (strcasecmp(command, "DATA") == 0) {
-		if (client_init == 0) {
+	} else if (strcasecmp(command, "DATA") == 0 || *status == CONN_MAIL_PRODECURE_AWAITING_MORE_DATA) {
+		if (*status != CONN_MAIL_PRODECURE_AWAITING_RCPT_OR_DATA && *status != CONN_MAIL_PRODECURE_AWAITING_MORE_DATA) {
 				send_formatted(fd, "503 bad sequence of commands \r\n");
+		} else {
+				*status = CONN_MAIL_PRODECURE_AWAITING_MORE_DATA;
+				char *data;
+				data = strdup(out);
+				data[strcspn(data, "\r\n")] = 0;
+				data[strcspn(data, "\n")] = 0;
+				send_formatted(fd, "  (ok i got that... %s) \r\n", data);
+				// TODO save data.
+				if (strcmp(data, ".") == 0) {
+					// END of data.
+					*status = CONN_OK;
+					send_formatted(fd, "250 OK \r\n");
+				}
 		}
-		send_formatted(fd, "DATA command received! \r\n");
 	} else if (strcasecmp(command, "RSET") == 0) {
-		if (client_init == 0) {
+		if (*status != CONN_OK) {
 				send_formatted(fd, "503 bad sequence of commands \r\n");
 		}
 		send_formatted(fd, "RSET command received! \r\n");
@@ -126,13 +144,11 @@ int parse_message(char * out, int fd, int client_init, char domain[]) {
 		send_formatted(fd, "250 OK\r\n");
 	} else if (strcasecmp(command, "QUIT") == 0) {
 		send_formatted(fd, "221 OK\r\n");
-		return 1; // Return value of 1 means close the connection.
+		*status = CONN_CLOSE;
 	} else {
 		send_formatted(fd, "500 command \"%s\" is not recognized. \r\n", command);
-		// TODO, return 502 for unsupported Command and 500 for unrecognized command
+		// TODO, send 502 for unsupported Command and 500 for unrecognized command
 	}
-
-	return 0; // Return value of 0 means keep connection alive
 }
 
 void handle_client(int fd) {
@@ -145,14 +161,12 @@ void handle_client(int fd) {
 
   /* TO BE COMPLETED BY THE STUDENT */
 	send_formatted(fd, "Welcome\r\n");
-	int client_init = 0;
+	int status = CONN_AWAITING_HELO_EHLO; // See beginning of files to internal server status codes.
 	while(nb_read_line(nb, recvbuf) > 0) {
 		// send_formatted(fd, "  -- parsing command -- \r\n"); // FOR TESTING
-		int code = parse_message(recvbuf, fd, client_init, my_uname.__domainname);
-		if (code == 1) {
+		parse_message(recvbuf, fd, &status, my_uname.__domainname);
+		if (status == CONN_CLOSE) {
 			nb_destroy(nb);
-		} else if (code == 2) {
-			client_init = 1;
 		}
 		// send_formatted(fd, "  -- waiting for next command -- \r\n"); // FOR TESTING
 	}
@@ -161,7 +175,7 @@ void handle_client(int fd) {
 }
 
 
-char * get_rcpt(char * buf) {
+char * get_forward_path(char * buf) {
 	const char tolc[] = "to:<";
 	const char touc[] = "TO:<";
 	const char lbracket[2] = "<";
@@ -171,6 +185,31 @@ char * get_rcpt(char * buf) {
 	result = strstr(buf, tolc);
 	if (result == NULL) {
 		result = strstr(buf, touc);
+	}
+
+	if (result == NULL) {
+		return NULL;
+	} else {
+		if (strchr(result, '>') == NULL) {
+			return NULL;
+		}
+		result = strstr(result, lbracket);  // "FROM:<str>" --> "<str>"
+		result = strtok(result, lbracket);  // "<str>" --> "str>"
+		result = strtok(result, rbracket); // str>" --> "str"
+		return result;
+	}
+}
+
+char * get_reverse_path(char * buf) {
+	const char fromlc[] = "from:<";
+	const char fromuc[] = "FROM:<";
+	const char lbracket[2] = "<";
+	const char rbracket[2] = ">";
+	char *result;
+
+	result = strstr(buf, fromlc);
+	if (result == NULL) {
+		result = strstr(buf, fromuc);
 	}
 
 	if (result == NULL) {
