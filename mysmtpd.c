@@ -13,6 +13,8 @@
 
 static void handle_client(int fd);
 
+char * get_rcpt(char * buf);
+
 int main(int argc, char *argv[]) {
 
   if (argc != 2) {
@@ -59,8 +61,8 @@ int parse_message(char * out, int fd, int client_init, char domain[]) {
 			send_formatted(fd, "503 bad sequence of commands \r\n");
 		} else {
 
-			const char fromlc[] = "from:";
-			const char fromuc[] = "FROM:";
+			const char fromlc[] = "from:<";
+			const char fromuc[] = "FROM:<";
 			char *param;
 			param = strstr(out, fromlc);
 			if (param == NULL) {
@@ -70,6 +72,11 @@ int parse_message(char * out, int fd, int client_init, char domain[]) {
 			if (param == NULL) {
 				send_formatted(fd, "501 who is this from? \r\n");
 			} else {
+				param[strcspn(param, "\r\n")] = 0;
+				// TODO get the from user inside the "<...>"
+				// TODO check the reverse-path is valid
+				// TODO check the mail-parameters after the reverse-path
+				// TODO store reverse-path
 				send_formatted(fd, "250 OK (%s) \r\n", param);
 			}
 		}
@@ -78,15 +85,19 @@ int parse_message(char * out, int fd, int client_init, char domain[]) {
 		if (client_init == 0) {
 				send_formatted(fd, "503 bad sequence of commands \r\n");
 		} else {
-			// const char to[] = "to:";
-			// char *param;
-			// param = strstr(out, to);
-			// if (param == NULL) {
-			// 	send_formatted(fd, "501 who is this to? \r\n");
-			// }
+			char * rcpt = get_rcpt(out);
 
 			// TODO handle multiple recipients
-			send_formatted(fd, "250 OK (%s) \r\n", "asdf");
+			if (rcpt == NULL) {
+				send_formatted(fd, "501 who is this to? \r\n");
+			} else {
+				// param[strcspn(param, "\r\n")] = 0;
+				// TODO get the from user inside the "<...>"
+				// TODO check the forward-path is valid (call is_valid_user ???)
+				// TODO check the mail-parameters after the forward-path
+				// TODO store forward-path
+				send_formatted(fd, "250 OK (%s) \r\n", rcpt);
+			}
 		}
 	} else if (strcasecmp(command, "DATA") == 0) {
 		if (client_init == 0) {
@@ -134,11 +145,10 @@ void handle_client(int fd) {
 
   /* TO BE COMPLETED BY THE STUDENT */
 	send_formatted(fd, "Welcome\r\n");
-	char out[1024];
 	int client_init = 0;
-	while(nb_read_line(nb, out) > 0) {
+	while(nb_read_line(nb, recvbuf) > 0) {
 		// send_formatted(fd, "  -- parsing command -- \r\n"); // FOR TESTING
-		int code = parse_message(out, fd, client_init, my_uname.__domainname);
+		int code = parse_message(recvbuf, fd, client_init, my_uname.__domainname);
 		if (code == 1) {
 			nb_destroy(nb);
 		} else if (code == 2) {
@@ -148,4 +158,30 @@ void handle_client(int fd) {
 	}
 
 	send_formatted(fd, "Goodbye\r\n");
+}
+
+
+char * get_rcpt(char * buf) {
+	const char tolc[] = "to:<";
+	const char touc[] = "TO:<";
+	const char lbracket[2] = "<";
+	const char rbracket[2] = ">";
+	char *result;
+
+	result = strstr(buf, tolc);
+	if (result == NULL) {
+		result = strstr(buf, touc);
+	}
+
+	if (result == NULL) {
+		return NULL;
+	} else {
+		if (strchr(result, '>') == NULL) {
+			return NULL;
+		}
+		result = strstr(result, lbracket);  // "FROM:<str>" --> "<str>"
+		result = strtok(result, lbracket);  // "<str>" --> "str>"
+		result = strtok(result, rbracket); // str>" --> "str"
+		return result;
+	}
 }
