@@ -90,14 +90,6 @@ void handle_client(int fd) {
 				if (from == NULL) {
 					send_formatted(fd, "501 who is this from? \r\n");
 				} else {
-					// char header[] = "From: ";
-					// strcat(header, from);
-					// strcat(header, "\n");
-					// write(tempfile, header, strlen(header));
-					// // Since we only have 1 sender, we add the beginning of the
-					// // "To:" header now to make the RCPT command easier.
-					// char rcptheader[] = "To: ";
-					// write(tempfile, rcptheader, strlen(rcptheader));
 					status = CONN_MAIL_PRODECURE_AWAITING_RCPT;
 					send_formatted(fd, "250 OK \r\n");
 				}
@@ -114,8 +106,6 @@ void handle_client(int fd) {
 				} else {
 					if (is_valid_user(rcpt, NULL) == 1) {
 						add_user_to_list(&user_list, rcpt);
-						strcat(rcpt, "\n");
-						write(tempfile, rcpt, strlen(rcpt));
 						status = CONN_MAIL_PRODECURE_AWAITING_RCPT_OR_DATA;
 						send_formatted(fd, "250 OK \r\n");
 					} else {
@@ -130,17 +120,16 @@ void handle_client(int fd) {
 			if (status == CONN_MAIL_PRODECURE_AWAITING_RCPT_OR_DATA) {
 				send_formatted(fd, "354 start mail input; end with <CLRF>.<CLRF> \r\n");
 				status = CONN_MAIL_PRODECURE_AWAITING_MORE_DATA;
-				char header[] = "Body: \r\n";
-				write(tempfile, header, strlen(header));
-				if (strlen(data) > 5) {
-					char *body;
-					body = strchr(data, ' ');
-					body = strtok(body, " ");
-					write(tempfile, body, strlen(body));
-				}
+				// if (strlen(data) > 5) {
+				// 	char *body;
+				// 	body = strchr(data, ' ');
+				// 	body = strtok(body, " ");
+				// 	write(tempfile, body, strlen(body));
+				// }
 			} else if (status == CONN_MAIL_PRODECURE_AWAITING_MORE_DATA) {
 
-				if (strcmp(data, ".\r\n") == 0 || strcmp(data, ".\n") == 0 ) {
+				// if (strcmp(data, ".\r\n") == 0 || strcmp(data, ".\n") == 0 ) {
+				if (strcmp(data, ".\r\n") == 0) {
 					status = CONN_OK;
 					close(tempfile);
 					save_user_mail(filename, user_list);
